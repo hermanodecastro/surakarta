@@ -6,7 +6,6 @@ const server = new WebSocket.Server({
 let sockets = [];
 
 server.on('connection', (socket) => {
-    console.log(socket);
     sockets.push(socket);
     socket.on('message', msg => {
         console.log(JSON.parse(msg));

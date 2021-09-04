@@ -1,25 +1,31 @@
 use serde_derive::Deserialize;
-use yew::{Component, ComponentLink, format::{Json, Text}, html, services::{ConsoleService, WebSocketService, websocket::{WebSocketStatus, WebSocketTask}}};
+use yew::{Component, ComponentLink, Html, InputData, format::{Json, Text}, html, services::{
+        websocket::{WebSocketStatus, WebSocketTask},
+        ConsoleService, WebSocketService,
+    }};
 
+mod view;
+use view::View;
 struct Model {
-    value: i32,
+    data: Data,
     link: ComponentLink<Self>,
     ws: Option<WebSocketTask>,
     status: String,
+    html: Vec<Html>
 }
 
 #[derive(Deserialize, Debug)]
 struct Data {
-    value: String,
+    message: String,
 }
 
 enum Msg {
-    Connect,
+    Connect, //conectar automaticamente?
     Disconnected,
-    Update,
     Received(Text),
     Status(WebSocketStatus),
-    SendText
+    SendMessage,
+    UpdateMessage(String),
 }
 
 impl Component for Model {
@@ -29,10 +35,11 @@ impl Component for Model {
 
     fn create(_props: Self::Properties, link: ComponentLink<Self>) -> Self {
         Self {
-            value: 0,
+            data: Data { message: String::from("") },
             link,
             status: String::from(""),
             ws: None,
+            html: vec![ html!{} ]
         }
     }
 
@@ -58,13 +65,16 @@ impl Component for Model {
                 self.status = "Disconnected".to_string();
                 self.ws = None;
                 true
-            },
-            Msg::Received(data) => {
-                ConsoleService::log(format!("{}", data.expect("Couldn't receive data")).as_str());
-                true
             }
-            Msg::Update => {
-                self.value += 1;
+            Msg::Received(data) => {
+                ConsoleService::log(
+                    format!("Received: {}", data.expect("Couldn't receive data")).as_str(),
+                );
+                self.html.push(
+                    html! {
+                        <p>{self.data.message.clone()}</p>
+                    }
+                );
                 true
             }
             Msg::Status(WebSocketStatus::Opened) => {
@@ -77,20 +87,24 @@ impl Component for Model {
                 true
             }
             Msg::Status(WebSocketStatus::Error) => {
-                self.status = String::from("Error Connection");
+                self.status = "Error Connection".to_string();
                 true
-            },
-            Msg::SendText => {
-                match self.ws {
-                    Some(ref mut task) => {
-                        task.send(Json(&format!("{}", self.value)));
-                        true
-                    }
-                    None => false,
+            }
+            Msg::SendMessage => match self.ws {
+                Some(ref mut task) => {
+                    task.send(Json(&format!("{}", self.data.message)));
+                    true
                 }
+                None => false,
+            },
+            Msg::UpdateMessage(message) => {
+                self.data.message = message;
+                true
             }
         }
     }
+
+    // Ótima referencia sobre yew: https://dev.to/rusty_sys_dev/understanding-yew-part-1-3cfn
 
     fn change(&mut self, _props: Self::Properties) -> yew::ShouldRender {
         false
@@ -100,11 +114,13 @@ impl Component for Model {
         html! {
             <div>
                 <h1>{format!("Status: {}", self.status)}</h1>
-                <h2>{self.value}</h2>
                 <button onclick=self.link.callback(|_| Msg::Connect)>{ "Connect" }</button>
-                <button onclick=self.link.callback(|_| Msg::Update)>{ "Add" }</button>
-                <button onclick=self.link.callback(|_| Msg::Disconnected)>{ "Disconect" }</button>
-                <button onclick=self.link.callback(|_| Msg::SendText)>{ "Send Text" }</button>
+                <input oninput=self.link.callback(|event: InputData| Msg::UpdateMessage(event.value)) placeholder="Message" />
+                <button onclick=self.link.callback(|_| Msg::SendMessage)>{ "Send" }</button>
+                <ul class="item-list">
+                    // { for self.props.items.iter().map(renderItem) }
+                    {for self.html.clone() }
+                </ul>
             </div>
         }
     }
