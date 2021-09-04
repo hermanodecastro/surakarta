@@ -67,12 +67,9 @@ impl Component for Model {
                 true
             }
             Msg::Received(data) => {
-                ConsoleService::log(
-                    format!("Received: {}", data.expect("Couldn't receive data")).as_str(),
-                );
                 self.html.push(
                     html! {
-                        <p>{self.data.message.clone()}</p>
+                        <p>{data.unwrap().clone()}</p>
                     }
                 );
                 true
