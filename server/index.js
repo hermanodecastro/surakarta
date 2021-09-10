@@ -30,7 +30,6 @@ let handleData = (data) => {
 let handleUserName = (data) => {
     let username = data.content;
     users.push(username);
-    console.log(`Lenght: ${users.length}`);
     if(users.length % 2 == 0) {
         //inverte o nome dos usuarios, manda o nome do oponente para cada usuario
         let firstUserData = {

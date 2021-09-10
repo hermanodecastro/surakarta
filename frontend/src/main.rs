@@ -2,20 +2,147 @@ use std::fmt::Display;
 
 use anyhow::Error;
 use serde_derive::{Deserialize, Serialize};
-use yew::{Component, ComponentLink, Html, InputData, KeyboardEvent, format::{Json, Text}, html, services::{
-        websocket::{WebSocketStatus, WebSocketTask},
-        ConsoleService, WebSocketService,
-    }};
+use yew::{Component, ComponentLink, Html, InputData, KeyboardEvent, format::{Json, Text}, html, services::{ConsoleService, StorageService, WebSocketService, storage::Area, websocket::{WebSocketStatus, WebSocketTask}}};
 
 mod components;
 // use components::{home::Home, view::View};
 struct Model {
+    board: Vec<Html>,
+    session: StorageService,
+    game: Game,
     user: User,
     data: Data,
     link: ComponentLink<Self>,
     ws: Option<WebSocketTask>,
     status: String,
     html: Vec<Html>
+}
+
+impl Model {
+    fn board(&self) -> Vec<Html> {
+        let mut html: Vec<Html> = Vec::new();
+        for _ in 0..6 {
+            for _ in 0..6 {
+                html.push(html!{<div class="square" onclick=self.link.callback(|_| Msg::HandleSquareClick)></div>})
+            }
+        }
+        html
+    }
+
+    fn view_form_username(&self) -> Html {
+        html! {
+            <div class="form-username">
+                <input 
+                    placeholder="Enter your name"
+                    oninput=self.link.callback(|event: InputData| Msg::UpdateUserName(event))
+                    onkeypress=self.link.callback(|event: KeyboardEvent| {
+                        if event.key() == "Enter" {
+                            Msg::Connect
+                        } else {
+                            Msg::None
+                        }
+                    })
+                />
+                <button onclick=self.link.callback(|_| Msg::Connect)>{ "Connect"}</button>
+                <p>{format!("Status: {}", self.status.clone())}</p>
+            </div>
+        }
+    }
+
+    fn view_chat(&self) -> Html {
+        html! {
+            <>
+                <input 
+                    oninput=self.link.callback(|event: InputData| Msg::UpdateMessage(event)) 
+                    onkeypress=self.link.callback(|event: KeyboardEvent| {
+                        if event.key() == "Enter" {
+                            Msg::SendMessage
+                        } else {
+                            Msg::None
+                        }
+                    })
+                    value=self.data.content.clone()
+                    placeholder="Enter the message" 
+                />
+                <button onclick=self.link.callback(|_| Msg::SendMessage)>{ "Send" }</button>
+                <p>{format!("Status: {}", self.status.clone())}</p>
+                <ul class="item-list">
+                    {for self.html.clone() }
+                </ul>
+            </>
+        }
+    }
+
+    fn view_board(&self) -> Html {
+        html! {
+            <>
+                <div class="container">
+                    {for self.board.clone()}
+                </div>
+                <svg width="100" height="100" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="25" fill="#EF5169" />
+                </svg>
+            </>
+        }
+    }
+
+    fn view_main(&self) -> Html {
+        let username: Json<Text> = self.session.restore("username");
+        let username = username.0.expect("Couldn't get username from local storage");
+        let opponent: Json<Text> = self.session.restore("opponent");
+        let opponent = opponent.0.expect("Couldn't get opponent from local storage");
+
+        html! {
+            <>
+                // <div>
+                //     <header class="header flex">
+                //         <ul>
+                //             <li>{format!("{} Vs {}", username, opponent)}</li>
+                //         </ul>
+                //     </header>
+                // </div>
+                // {self.view_chat()}
+                {self.view_board()}
+            </>
+        }
+    }
+
+    fn handle_data(&mut self, data: Data) -> yew::ShouldRender {
+        if data.metadata == "ready".to_string() {
+            ConsoleService::log(data.content.as_str());
+            self.session.store("username", Json(&self.user.name));
+            self.session.store("opponent", Json(&data.content));
+            self.game.started = true;
+            self.status = "Game begin".to_string();
+            true
+        } else if data.metadata == "waiting" {
+            self.status = "Waiting for an oponent...".to_string();
+            true
+        } else if data.metadata == "message" {
+            self.html.push(
+                html! {
+                    <p>{data.content}</p>
+                }
+            );
+            true
+        } else {
+            false
+        }
+    }
+}
+
+struct Board {}
+
+impl Board {
+    fn new() -> Vec<Html> {
+        let mut html: Vec<Html> = Vec::new();
+        for _ in 0..6 {
+            for _ in 0..6 {
+                html.push(html!{<div class="square"></div>})
+            }
+        }
+        html
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -28,6 +155,9 @@ struct User {
     name: String,
     status: bool
 }
+struct Game {
+    started: bool,
+}
 
 enum Msg {
     Connect, //conectar automaticamente?
@@ -36,7 +166,14 @@ enum Msg {
     SendMessage,
     UpdateMessage(InputData),
     UpdateUserName(InputData),
-    None
+    None,
+    HandleSquareClick
+}
+
+enum ResponseMessage {
+    Ready,
+    Waiting,
+    Message,
 }
 
 type Response<T> = Json<Result<T, Error>>;
@@ -48,6 +185,9 @@ impl Component for Model {
 
     fn create(_props: Self::Properties, link: ComponentLink<Self>) -> Self {
         Self {
+            board:  Board::new(), //vec![html!{<div class="square" onclick=self.link.callback(|_| Msg::HandleSquareClick)></div>}; 36],
+            session: StorageService::new(Area::Session).expect("Couldn't create session storage"),
+            game: Game { started: false},
             user: User { name: "".to_string(), status: false },
             data: Data { metadata: "".to_string(), content: "".to_string()},
             link,
@@ -78,23 +218,7 @@ impl Component for Model {
             Msg::Received(data) => {
                 let data = data.0.expect("Couldn't unpacket data");
                 ConsoleService::log(format!("{:?}", data).as_str());
-                if data.metadata == "ready".to_string() {
-                    self.user.status = true;
-                    self.status = "Game begin".to_string();
-                    true
-                } else if data.metadata == "waiting" {
-                    self.status = "Waiting for an oponent...".to_string();
-                    true
-                } else if data.metadata == "message" {
-                    self.html.push(
-                        html! {
-                            <p>{data.content}</p>
-                        }
-                    );
-                    true
-                } else {
-                    false
-                }
+                self.handle_data(data)
                 
             },
             Msg::Status(WebSocketStatus::Opened) => match self.ws {
@@ -134,6 +258,10 @@ impl Component for Model {
             }
             Msg::None => {
                 false
+            },
+            Msg::HandleSquareClick => {
+                ConsoleService::log("Clicked");
+                true
             }
         }
     }
@@ -145,51 +273,14 @@ impl Component for Model {
     }
 
     fn view(&self) -> yew::Html {
+        
         html! {
             <div>
                 {
-                    if self.user.status {
-                        html! {
-                            <>
-                                // <h1>{format!("Status: {}", self.status)}</h1>
-                                // <button onclick=self.link.callback(|_| Msg::Connect)>{ "Connect" }</button>
-                                <input 
-                                    oninput=self.link.callback(|event: InputData| Msg::UpdateMessage(event)) 
-                                    onkeypress=self.link.callback(|event: KeyboardEvent| {
-                                        if event.key() == "Enter" {
-                                            Msg::SendMessage
-                                        } else {
-                                            Msg::None
-                                        }
-                                    })
-                                    value=self.data.content.clone()
-                                    placeholder="Enter the message" 
-                                />
-                                <button onclick=self.link.callback(|_| Msg::SendMessage)>{ "Send" }</button>
-                                <p>{format!("Status: {}", self.status.clone())}</p>
-                                <ul class="item-list">
-                                    {for self.html.clone() }
-                                </ul>
-                            </>
-                        }
+                    if self.game.started {
+                        { self.view_main() }
                     } else {
-                        html! {
-                            <>
-                                <input 
-                                    placeholder="Enter your name"
-                                    oninput=self.link.callback(|event: InputData| Msg::UpdateUserName(event))
-                                    onkeypress=self.link.callback(|event: KeyboardEvent| {
-                                        if event.key() == "Enter" {
-                                            Msg::Connect
-                                        } else {
-                                            Msg::None
-                                        }
-                                    })
-                                />
-                                <button onclick=self.link.callback(|_| Msg::Connect)>{ "Connect"}</button>
-                                <p>{format!("Status: {}", self.status.clone())}</p>
-                            </>
-                        }
+                        { self.view_form_username() }
                     }
                 
                 }
